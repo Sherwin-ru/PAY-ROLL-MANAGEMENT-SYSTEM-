@@ -1,0 +1,162 @@
+<?php
+session_start();
+$host = 'localhost';
+$db = 'payroll_db';
+$user = 'root';
+$pass = '';
+$dsn = "mysql:host=$host;dbname=$db;charset=utf8mb4";
+$pdo = new PDO($dsn, $user, $pass);
+
+// Handle Register
+if (isset($_POST['register'])) {
+    $uname = $_POST['username'];
+    $email = $_POST['email'];
+    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+    $stmt = $pdo->prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
+    try {
+        $stmt->execute([$uname, $email, $password]);
+        echo "<script>alert('Registration successful!');</script>";
+    } catch (PDOException $e) {
+        echo "<script>alert('Username already taken.');</script>";
+    }
+}
+
+// Handle Login
+if (isset($_POST['login'])) {
+    $uname = $_POST['username'];
+    $password = $_POST['password'];
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE username=?");
+    $stmt->execute([$uname]);
+    $user = $stmt->fetch();
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['user'] = $user['username'];
+    } else {
+        echo "<script>alert('Invalid login credentials.');</script>";
+    }
+}
+
+// Handle Logout
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header("Location: index.php");
+    exit;
+}
+
+// CRUD Operations for Employees
+if (isset($_POST['add_employee'])) {
+    $stmt = $pdo->prepare("INSERT INTO employees (name, position, salary) VALUES (?, ?, ?)");
+    $stmt->execute([$_POST['name'], $_POST['position'], $_POST['salary']]);
+}
+
+if (isset($_GET['delete_emp'])) {
+    $stmt = $pdo->prepare("DELETE FROM employees WHERE id=?");
+    $stmt->execute([$_GET['delete_emp']]);
+}
+
+// CRUD Operations for Payroll
+if (isset($_POST['add_payroll'])) {
+    $stmt = $pdo->prepare("INSERT INTO payroll (employee_id, pay_month, amount) VALUES (?, ?, ?)");
+    $stmt->execute([$_POST['emp_id'], $_POST['month'], $_POST['amount']]);
+}
+
+if (isset($_GET['delete_pay'])) {
+    $stmt = $pdo->prepare("DELETE FROM payroll WHERE id=?");
+    $stmt->execute([$_GET['delete_pay']]);
+}
+?>
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Payroll Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="style.css" rel="stylesheet">
+</head>
+
+
+<body>
+<div class="container">
+
+<?php if (!isset($_SESSION['user'])): ?>
+    <div class="row">
+        <div class="col-md-6">
+            <h3>Login</h3>
+            <form method="POST">
+                <input name="username" class="form-control mb-2" required placeholder="Username">
+                <input type="password" name="password" class="form-control mb-2" required placeholder="Password">
+                <button name="login" class="btn btn-primary">Login</button>
+            </form>
+        </div>
+        <div class="col-md-6">
+            <h3>Register</h3>
+            <form method="POST">
+                <input name="username" class="form-control mb-2" required placeholder="Username">
+                <input name="email" type="email" class="form-control mb-2" required placeholder="Email">
+                <input type="password" name="password" class="form-control mb-2" required placeholder="Password">
+                <button name="register" class="btn btn-success">Register</button>
+            </form>
+        </div>
+    </div>
+<?php else: ?>
+    <h3>Welcome, <?= $_SESSION['user'] ?> <a href="?logout=1" class="btn btn-danger btn-sm">Logout</a></h3>
+
+    <!-- Dashboard -->
+    <h4>Dashboard</h4>
+    <?php
+    $empCount = $pdo->query("SELECT COUNT(*) FROM employees")->fetchColumn();
+    $payTotal = $pdo->query("SELECT SUM(amount) FROM payroll")->fetchColumn();
+    ?>
+    <div class="row mb-4">
+        <div class="col-md-6"><div class="alert alert-info">Total Employees: <?= $empCount ?></div></div>
+        <div class="col-md-6"><div class="alert alert-success">Total Payroll Paid: ₹<?= number_format($payTotal,2) ?></div></div>
+    </div>
+
+    <!-- Employee Management -->
+    <h4>Employee Management</h4>
+    <form method="POST" class="row g-2">
+        <input name="name" required class="form-control" placeholder="Name">
+        <input name="position" required class="form-control" placeholder="Position">
+        <input name="salary" required class="form-control" type="number" step="0.01" placeholder="Salary">
+        <button name="add_employee" class="btn btn-primary mt-2">Add Employee</button>
+    </form>
+    <table class="table mt-3">
+        <tr><th>ID</th><th>Name</th><th>Position</th><th>Salary</th><th>Action</th></tr>
+        <?php foreach ($pdo->query("SELECT * FROM employees") as $row): ?>
+            <tr>
+                <td><?= $row['id'] ?></td><td><?= $row['name'] ?></td>
+                <td><?= $row['position'] ?></td><td>₹<?= $row['salary'] ?></td>
+                <td><a href="?delete_emp=<?= $row['id'] ?>" class="btn btn-sm btn-danger">Delete</a></td>
+            </tr>
+        <?php endforeach; ?>
+    </table>
+
+    <!-- Payroll Management -->
+    <h4>Payroll Management</h4>
+    <form method="POST" class="row g-2">
+        <select name="emp_id" class="form-control" required>
+            <option value="">Select Employee</option>
+            <?php foreach ($pdo->query("SELECT * FROM employees") as $emp): ?>
+                <option value="<?= $emp['id'] ?>"><?= $emp['name'] ?></option>
+            <?php endforeach; ?>
+        </select>
+        <input name="month" required class="form-control" placeholder="Month">
+        <input name="amount" required class="form-control" type="number" step="0.01" placeholder="Amount">
+        <button name="add_payroll" class="btn btn-success mt-2">Add Payroll</button>
+    </form>
+    <table class="table mt-3">
+        <tr><th>ID</th><th>Employee</th><th>Month</th><th>Amount</th><th>Action</th></tr>
+        <?php
+        $stmt = $pdo->query("SELECT p.id, e.name, p.pay_month, p.amount FROM payroll p JOIN employees e ON p.employee_id = e.id");
+        foreach ($stmt as $row): ?>
+            <tr>
+                <td><?= $row['id'] ?></td><td><?= $row['name'] ?></td>
+                <td><?= $row['pay_month'] ?></td><td>₹<?= $row['amount'] ?></td>
+                <td><a href="?delete_pay=<?= $row['id'] ?>" class="btn btn-sm btn-danger">Delete</a></td>
+            </tr>
+        <?php endforeach; ?>
+    </table>
+
+<?php endif; ?>
+</div>
+</body>
+</html>
